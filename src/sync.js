@@ -406,6 +406,109 @@ async function createDraftItem(slugs, fields) {
   return true;
 }
 
+/* ---------------- Image backfill ---------------- */
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function getAllItems() {
+  const out = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const res = await fetch(
+      `${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items?limit=${limit}&offset=${offset}`,
+      { headers: wfHeaders() }
+    );
+    const { text, json } = await readBody(res);
+    if (!res.ok || !json) {
+      fail("Webflow items list (for backfill)", res.status, text);
+    }
+    const items = json.items || [];
+    for (const it of items) out.push(it);
+    if (items.length < limit) break;
+    offset += limit;
+  }
+  return out;
+}
+
+async function patchItemImage(itemId, imageSlug, imageUrl) {
+  const res = await fetch(`${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items/${itemId}`, {
+    method: "PATCH",
+    headers: wfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ fieldData: { [imageSlug]: { url: imageUrl } } }),
+  });
+  const { text, json } = await readBody(res);
+  if (!res.ok || !json) {
+    console.warn(`  PATCH image failed for item ${itemId} (HTTP ${res.status}): ${text.slice(0, 300)}`);
+    return false;
+  }
+  return true;
+}
+
+async function publishItems(itemIds) {
+  if (itemIds.length === 0) return;
+  const res = await fetch(`${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items/publish`, {
+    method: "POST",
+    headers: wfHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ itemIds }),
+  });
+  const { text } = await readBody(res);
+  if (!res.ok) {
+    console.warn(`  Re-publish failed (HTTP ${res.status}): ${text.slice(0, 300)}`);
+  }
+}
+
+/**
+ * One-time (idempotent) pass: for existing items with no image, resolve the
+ * image from the matching LinkedIn post, upload it to Webflow Assets, attach it,
+ * and re-publish items that were already live so the image shows without a manual
+ * re-approval. Items that already have an image, or whose LinkedIn post has no
+ * image, are left untouched.
+ */
+async function backfillImages(accessToken, slugs, postsByUrn) {
+  const items = await getAllItems();
+  let added = 0;
+  const toPublish = [];
+
+  for (const item of items) {
+    if (item.isArchived) continue;
+    const fd = item.fieldData || {};
+    const existing = fd[slugs.postImage];
+    const hasImage = existing && (existing.url || typeof existing === "string");
+    if (hasImage) continue;
+
+    const urn = fd[slugs.linkedinUrn];
+    if (!urn) continue;
+    const post = postsByUrn.get(urn);
+    if (!post) continue; // outside the recent LinkedIn window
+
+    const imageUrn = extractImageUrn(post);
+    if (!imageUrn) continue; // this post genuinely has no image
+
+    const downloadUrl = await resolveImageDownloadUrl(accessToken, imageUrn);
+    if (!downloadUrl) continue;
+    const hosted = await rehostImage(downloadUrl, urn);
+    if (!hosted) continue;
+
+    const ok = await patchItemImage(item.id, slugs.postImage, hosted);
+    if (ok) {
+      added += 1;
+      console.log(`  Backfilled image: ${fd.name || urn}`);
+      const wasLive = Boolean(item.lastPublished) && item.isDraft !== true;
+      if (wasLive) toPublish.push(item.id);
+    }
+    await sleep(400); // stay comfortably under Webflow rate limits
+  }
+
+  if (toPublish.length > 0) {
+    await publishItems(toPublish);
+    console.log(`  Re-published ${toPublish.length} item(s) so images show live.`);
+  }
+  console.log(`Image backfill complete. Images added: ${added}.`);
+}
+
 /* ---------------- Main ---------------- */
 
 async function main() {
@@ -458,7 +561,7 @@ async function main() {
       [slugs.linkedinUrn]: urn,
     };
     if (imageUrl) {
-      fieldData[slugs.postImage] = imageUrl;
+      fieldData[slugs.postImage] = { url: imageUrl };
     }
 
     const ok = await createDraftItem(slugs, fieldData);
@@ -473,6 +576,13 @@ async function main() {
 
   console.log("----------------------------------------");
   console.log(`Draft sync complete. Created: ${created}, skipped (already synced): ${skipped}, failed: ${failed}.`);
+
+  // Attach images to any existing items that are missing one.
+  const postsByUrn = new Map();
+  for (const p of posts) {
+    if (p.id) postsByUrn.set(p.id, p);
+  }
+  await backfillImages(accessToken, slugs, postsByUrn);
 
   // Build the public feed from APPROVED posts for the homepage.
   const livePosts = await getLivePosts(slugs);
