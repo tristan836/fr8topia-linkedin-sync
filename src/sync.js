@@ -5,6 +5,11 @@
  * them as DRAFT items in the Webflow "LinkedIn Posts" CMS collection.
  * A human reviews and publishes in Webflow. This script never publishes.
  *
+ * It also writes posts.json to the repo root: a compact feed of the posts a
+ * human has APPROVED (published) in Webflow. The public homepage embed reads
+ * that file to render the "Recent Updates" section. No API token ever reaches
+ * the browser; the token stays here in GitHub Actions.
+ *
  * Runs in GitHub Actions on a daily schedule. All configuration comes from
  * environment variables (GitHub Actions secrets). Nothing is hardcoded and
  * no secret is ever logged.
@@ -20,6 +25,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { env, exit } from "node:process";
 
 // LinkedIn versioned API header, format YYYYMM.
@@ -31,6 +37,10 @@ const LI_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
 const LI_API = "https://api.linkedin.com/rest";
 const WF_API = "https://api.webflow.com/v2";
 const POST_FETCH_COUNT = 15;
+
+// How many approved posts to publish into posts.json for the homepage.
+const FEED_MAX = 12;
+const FEED_FILE = "posts.json";
 
 // Expected Webflow field display names. Actual slugs are resolved from the
 // collection schema at runtime so a slug rename does not silently break us.
@@ -104,11 +114,9 @@ async function fetchOrgPosts(accessToken) {
     fail("LinkedIn posts fetch", res.status, text);
   }
   const elements = Array.isArray(json.elements) ? json.elements : [];
-  // Keep only published, publicly visible posts.
   const posts = elements.filter(
     (p) => p.lifecycleState === "PUBLISHED" && (p.visibility === "PUBLIC" || p.visibility === undefined)
   );
-  // Newest first by published time.
   posts.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
   console.log(`Fetched ${elements.length} posts from LinkedIn, ${posts.length} published and public.`);
   return posts;
@@ -142,18 +150,11 @@ async function resolveImageDownloadUrl(accessToken, imageUrn) {
   return json.downloadUrl || null;
 }
 
-/**
- * Convert LinkedIn "little text format" commentary to plain readable text.
- * Handles hashtag templates and inline mention markup conservatively.
- */
 function cleanCommentary(raw) {
   if (!raw) return "";
   let out = raw;
-  // {hashtag|\#|freight} -> #freight
   out = out.replace(/\{hashtag\|\\?#\|([^}]*)\}/g, "#$1");
-  // @[Display Name](urn:li:...) -> Display Name
   out = out.replace(/@\[([^\]]+)\]\(urn:[^)]*\)/g, "$1");
-  // Unescape little-text escapes like \( \) \{ \} \< \> \| \~ \* \@ \[ \]
   out = out.replace(/\\([(){}<>|~*@\[\]_#])/g, "$1");
   return out.trim();
 }
@@ -169,9 +170,21 @@ function escapeHtml(s) {
 function toRichTextHtml(text) {
   if (!text) return "";
   const paragraphs = escapeHtml(text).split(/\n{2,}/);
-  return paragraphs
-    .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
-    .join("");
+  return paragraphs.map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("");
+}
+
+function stripHtml(html) {
+  if (!html) return "";
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function postPermalink(postUrn) {
@@ -223,9 +236,7 @@ async function getFieldSlugMap() {
     }
   }
   if (missing.length > 0) {
-    console.error(
-      "Webflow collection is missing expected fields (by display name): " + missing.join(", ")
-    );
+    console.error("Webflow collection is missing expected fields (by display name): " + missing.join(", "));
     console.error("Fields found: " + Object.keys(map).join(", "));
     exit(1);
   }
@@ -258,6 +269,53 @@ async function getExistingUrns(urnSlug) {
   return existing;
 }
 
+/**
+ * Read the APPROVED (published/live) items from the collection. These are the
+ * posts a human clicked Publish on. Used to build posts.json for the homepage.
+ */
+async function getLivePosts(slugs) {
+  const out = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const res = await fetch(
+      `${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items/live?limit=${limit}&offset=${offset}`,
+      { headers: wfHeaders() }
+    );
+    const { text, json } = await readBody(res);
+    if (!res.ok || !json) {
+      fail("Webflow live items list", res.status, text);
+    }
+    const items = json.items || [];
+    for (const item of items) {
+      const fd = item.fieldData || {};
+      const image = fd[slugs.postImage];
+      out.push({
+        urn: fd[slugs.linkedinUrn] || "",
+        name: fd.name || "",
+        text: stripHtml(fd[slugs.postText] || ""),
+        url: (fd[slugs.postUrl] && fd[slugs.postUrl].url) || fd[slugs.postUrl] || "",
+        date: fd[slugs.publishedDate] || "",
+        image: image && image.url ? image.url : null,
+      });
+    }
+    if (items.length < limit) break;
+    offset += limit;
+  }
+  out.sort((a, b) => new Date(b.date) - new Date(a.date));
+  return out.slice(0, FEED_MAX);
+}
+
+function writeFeedJson(posts) {
+  const payload = {
+    updated: new Date().toISOString(),
+    count: posts.length,
+    posts,
+  };
+  writeFileSync(FEED_FILE, JSON.stringify(payload, null, 2));
+  console.log(`Wrote ${FEED_FILE} with ${posts.length} approved posts.`);
+}
+
 function extFromContentType(ct) {
   if (!ct) return "jpg";
   if (ct.includes("png")) return "png";
@@ -266,11 +324,6 @@ function extFromContentType(ct) {
   return "jpg";
 }
 
-/**
- * Download image bytes from LinkedIn and upload them to Webflow Assets.
- * Returns the permanent Webflow-hosted URL, or null on any failure
- * (the post is then created without an image rather than failing the run).
- */
 async function rehostImage(downloadUrl, postUrn) {
   try {
     const imgRes = await fetch(downloadUrl);
@@ -283,7 +336,6 @@ async function rehostImage(downloadUrl, postUrn) {
     const fileName = `${makeSlug(postUrn)}.${extFromContentType(contentType)}`;
     const fileHash = createHash("md5").update(buffer).digest("hex");
 
-    // Step 1: register the asset with Webflow, get S3 upload instructions.
     const regRes = await fetch(`${WF_API}/sites/${env.WEBFLOW_SITE_ID}/assets`, {
       method: "POST",
       headers: wfHeaders({ "Content-Type": "application/json" }),
@@ -300,8 +352,6 @@ async function rehostImage(downloadUrl, postUrn) {
     const uploadUrl = reg.uploadUrl;
     const details = reg.uploadDetails || {};
 
-    // If Webflow already has this exact file (same hash), it may not need a
-    // new upload; the hosted URL is still valid either way.
     if (uploadUrl) {
       const form = new FormData();
       for (const [k, v] of Object.entries(details)) {
@@ -413,8 +463,12 @@ async function main() {
   }
 
   console.log("----------------------------------------");
-  console.log(`Sync complete. Created: ${created}, skipped (already synced): ${skipped}, failed: ${failed}.`);
-  console.log("New items are DRAFTS in Webflow. Review and publish them in the CMS.");
+  console.log(`Draft sync complete. Created: ${created}, skipped (already synced): ${skipped}, failed: ${failed}.`);
+
+  // Build the public feed from APPROVED posts for the homepage.
+  const livePosts = await getLivePosts(slugs);
+  writeFeedJson(livePosts);
+  console.log("New items are DRAFTS in Webflow. Approved (published) items now feed the homepage.");
 
   if (failed > 0) {
     exit(1);
