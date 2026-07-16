@@ -270,8 +270,12 @@ async function getExistingUrns(urnSlug) {
 }
 
 /**
- * Read the APPROVED (published/live) items from the collection. These are the
- * posts a human clicked Publish on. Used to build posts.json for the homepage.
+ * Read the APPROVED (published) items from the collection. These are the posts
+ * a human clicked Publish on. Used to build posts.json for the homepage.
+ *
+ * We fetch the standard items list and keep only items that are published:
+ * not draft, not archived, and carrying a lastPublished timestamp. This is
+ * more portable across API versions than the /items/live path.
  */
 async function getLivePosts(slugs) {
   const out = [];
@@ -279,15 +283,20 @@ async function getLivePosts(slugs) {
   const limit = 100;
   for (;;) {
     const res = await fetch(
-      `${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items/live?limit=${limit}&offset=${offset}`,
+      `${WF_API}/collections/${env.WEBFLOW_COLLECTION_ID}/items?limit=${limit}&offset=${offset}`,
       { headers: wfHeaders() }
     );
     const { text, json } = await readBody(res);
     if (!res.ok || !json) {
-      fail("Webflow live items list", res.status, text);
+      fail("Webflow items list (for feed)", res.status, text);
     }
     const items = json.items || [];
     for (const item of items) {
+      const isDraft = item.isDraft === true;
+      const isArchived = item.isArchived === true;
+      const published = Boolean(item.lastPublished);
+      if (isDraft || isArchived || !published) continue;
+
       const fd = item.fieldData || {};
       const image = fd[slugs.postImage];
       out.push({
