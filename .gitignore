@@ -1,0 +1,11 @@
+# Dependencies (none required, but just in case)
+node_modules/
+
+# Local environment files. Never commit secrets.
+.env
+.env.*
+*.local
+
+# OS noise
+Thumbs.db
+.DS_Store
