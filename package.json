@@ -1,0 +1,14 @@
+{
+  "name": "fr8topia-linkedin-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily sync of Fr8topia LinkedIn Company Page posts into Webflow CMS as drafts.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "authorize": "node src/authorize.js",
+    "sync": "node src/sync.js"
+  }
+}
