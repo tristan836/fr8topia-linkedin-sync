@@ -1,5 +1,30 @@
 {
-  "updated": "2026-07-16T12:34:35.002Z",
-  "count": 0,
-  "posts": []
+  "updated": "2026-07-16T12:42:25.876Z",
+  "count": 3,
+  "posts": [
+    {
+      "urn": "urn:li:share:7472725819266580480",
+      "name": "Fr8topia LLC loves CPG!🫶🏽 Let’s Groooowwww!🚀 CARE FOR...",
+      "text": "Fr8topia LLC loves CPG!🫶🏽\n \nLet’s Groooowwww!🚀\n\nCARE FOR ALL!❤️‍🩹\n\nVibes y’all!❤️\n\n#TogetherWeGrow\n\n#NothingWithoutTrucking",
+      "url": "https://www.linkedin.com/feed/update/urn:li:share:7472725819266580480/",
+      "date": "2026-06-16T19:04:31.957Z",
+      "image": null
+    },
+    {
+      "urn": "urn:li:ugcPost:7472713448234078208",
+      "name": "Fr8topia LLC your CPG retail consolidation partners! Look...",
+      "text": "Fr8topia LLC your CPG retail consolidation partners!\n\nLook us at Fr8topia.com and google us!\n\nYou’ll see why we are a CPG shipping carrier of choice!\n\nLet’s Groooowwww!🚀\n\nCARE FOR ALL!❤️‍🩹\n\nVibes y’all!❤️\n\n#TogetherWeGrow\n\n#NothingWithoutTrucking",
+      "url": "https://www.linkedin.com/feed/update/urn:li:ugcPost:7472713448234078208/",
+      "date": "2026-06-16T18:15:22.465Z",
+      "image": null
+    },
+    {
+      "urn": "urn:li:share:7292992363747020800",
+      "name": "Let's go Rod Marquez! CARE FOR ALL!❤️‍🩹 #TogetherWeGrow...",
+      "text": "Let's go Rod Marquez!\n\nCARE FOR ALL!❤️‍🩹\n\n#TogetherWeGrow\n#NothingWithoutTrucking",
+      "url": "https://www.linkedin.com/feed/update/urn:li:share:7292992363747020800/",
+      "date": "2025-02-05T19:47:56.919Z",
+      "image": null
+    }
+  ]
 }
