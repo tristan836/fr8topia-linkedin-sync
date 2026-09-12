@@ -19,5 +19,5 @@ jobs:
         env:
           WEBFLOW_API_TOKEN: ${{ secrets.WEBFLOW_API_TOKEN }}
           ALERTS_COLLECTION_ID: "6aa2af69859d0a554be01493"
-          MAX_AGE_DAYS: "21"
+          MAX_AGE_DAYS: "180"
           MAX_NEW_PER_RUN: "12"
