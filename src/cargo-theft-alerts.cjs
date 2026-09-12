@@ -20,13 +20,14 @@ const TYPE = {
   law: "85766e16b26e8b9811ae035f5963185d",
 };
 
-// Verify each feed URL once before first run. Feeds that fail are skipped, not fatal.
+// Topic-specific archive feeds. These are already about cargo theft, so the
+// keyword filter below is a safety net rather than the primary filter.
+// CCJ and Overdrive were removed: both return 403 to automated requests.
 const FEEDS = [
-  { name: "FreightWaves", url: "https://www.freightwaves.com/news/feed" },
+  { name: "FreightWaves", url: "https://www.freightwaves.com/news/tag/cargo-theft/feed" },
+  { name: "FreightWaves", url: "https://www.freightwaves.com/news/tag/freight-fraud/feed" },
+  { name: "Land Line", url: "https://landline.media/tag/cargo-theft/feed/" },
   { name: "Transport Topics", url: "https://www.ttnews.com/rss.xml" },
-  { name: "CCJ", url: "https://www.ccjdigital.com/rss" },
-  { name: "Overdrive", url: "https://www.overdriveonline.com/rss" },
-  { name: "Land Line", url: "https://landline.media/feed/" },
 ];
 
 const KEYWORDS = [
@@ -59,7 +60,8 @@ function region(title, desc) {
   return "";
 }
 
-function matches(title, desc) {
+function matches(title, desc, isTopicFeed) {
+  if (isTopicFeed) return true;           // archive feed is already on topic
   const t = `${title} ${desc}`.toLowerCase();
   return KEYWORDS.some(k => t.includes(k));
 }
@@ -151,7 +153,8 @@ async function main() {
         const when = e.isoDate ? Date.parse(e.isoDate) : (e.pubDate ? Date.parse(e.pubDate) : NaN);
         if (Number.isFinite(when) && when < cutoff) continue;
         const desc = e.contentSnippet || e.content || "";
-        if (!matches(e.title || "", desc)) continue;
+        const isTopicFeed = feed.url.includes("/tag/");
+        if (!matches(e.title || "", desc, isTopicFeed)) continue;
         const link = normalizeUrl(e.link);
         if (!link || seen.has(link)) continue;
         seen.add(link);
