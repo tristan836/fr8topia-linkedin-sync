@@ -1,0 +1,23 @@
+name: Cargo theft alerts sync
+
+on:
+  schedule:
+    # Mondays 14:00 UTC (7am PT). Change to "0 14 * * 1,4" for Mon + Thu.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install rss-parser@3
+      - run: node src/cargo-theft-alerts.js
+        env:
+          WEBFLOW_API_TOKEN: ${{ secrets.WEBFLOW_API_TOKEN }}
+          ALERTS_COLLECTION_ID: "6aa2af69859d0a554be01493"
+          MAX_AGE_DAYS: "21"
+          MAX_NEW_PER_RUN: "12"
